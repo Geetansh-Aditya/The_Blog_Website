@@ -95,13 +95,13 @@ with app.app_context():
 @app.route('/register', methods=["POST", "GET"])
 def register():
     registration = RegisterForm()
-    verification = OtpVerify()
     if registration.validate_on_submit():
         email = registration.email.data
         password = generate_password_hash(password=registration.password.data, method="pbkdf2:sha256", salt_length=8)
         name = registration.name.data
 
-        user = User.query.filter_by(email=email)
+        user = User.query.filter_by(email=email).first()
+
         if user:
             flash("You have already registered. Log in instead", category="error")
             return redirect(url_for("login"))
@@ -114,6 +114,7 @@ def register():
             'name' : name,
             'otp': str(otp)
         }
+        session['registration_initiated'] = True
 
         return redirect(url_for('verification'))
 
@@ -122,6 +123,10 @@ def register():
 
 @app.route("/verification", methods=['POST', 'GET'])
 def verification():
+    if not session.get('registration_initiated'):
+        flash('Access Denied', category='error')
+        return redirect(url_for('register'))
+
     verification = OtpVerify()
     if verification.validate_on_submit():
 
@@ -152,8 +157,8 @@ def verification():
 
 
 def send_verification_mail():
-    recipient = os.environ.get('EMAIL')
-    subject = ' TEST MAIL'
+    recipient = session.get('registration_data')['email']
+    subject = 'OTP For Blog Journey'
     with app.open_resource('templates/otp_mail.html') as f:
         html_content = f.read().decode('utf-8')
 
