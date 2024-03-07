@@ -1,5 +1,6 @@
+import random
 from datetime import date
-from flask import Flask, abort, render_template, redirect, url_for, flash, request
+from flask import Flask, abort, render_template, redirect, url_for, flash, request, session
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user
@@ -8,14 +9,24 @@ from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import Integer, String, Text, ForeignKey
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
-# Import your forms from the forms.py
-from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm
+from flask_mail import Mail, Message
+from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm, OtpVerify
 import os
 
 
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
+# Adding some more config for the otp verification
+app.config['MAIL_SERVER'] = 'smtp-mail.outlook.com'
+app.config['MAIL_USERNAME'] = os.environ.get('EMAIL')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('EMAIL')
+app.config['MAIL_PASSWORD'] = os.environ.get('PASSWORD_EMAIL')
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
+mail = Mail(app)
+
+
 ckeditor = CKEditor(app)
 Bootstrap5(app)
 
@@ -80,28 +91,86 @@ with app.app_context():
     db.create_all()
 
 
+
 @app.route('/register', methods=["POST", "GET"])
 def register():
     registration = RegisterForm()
+    verification = OtpVerify()
     if registration.validate_on_submit():
         email = registration.email.data
         password = generate_password_hash(password=registration.password.data, method="pbkdf2:sha256", salt_length=8)
         name = registration.name.data
 
-        # Creating a new User
-        new_user = User(email=email, password=password, name=name)
-        # Checking if we are able to add the new_user
-        # If not then the user already exists.
-        try:
+        user = User.query.filter_by(email=email)
+        if user:
+            flash("You have already registered. Log in instead", category="error")
+            return redirect(url_for("login"))
+
+        otp = send_verification_mail()
+
+        session['registration_data'] = {
+            'email':email,
+            "password": password,
+            'name' : name,
+            'otp': str(otp)
+        }
+
+        return redirect(url_for('verification'))
+
+    return render_template("register.html", form=registration, current_user=current_user)
+
+
+@app.route("/verification", methods=['POST', 'GET'])
+def verification():
+    verification = OtpVerify()
+    if verification.validate_on_submit():
+
+        user_input = verification.otp_verify.data
+
+        registration_data = session.get('registration_data')
+        if user_input == registration_data['otp']:
+
+            # Creating a new User
+
+            email = registration_data['email']
+            password = registration_data['password']
+            name = registration_data['name']
+            new_user = User(email=email, password=password, name=name)
+            # Checking if we are able to add the new_user
+            # If not then the user already exists.
+
             db.session.add(new_user)
             db.session.commit()
             login_user(new_user)
             return redirect(url_for("get_all_posts"))
-        except:
-            flash("You have already registered. Log in instead", category="error")
-            return redirect(url_for("login"))
 
-    return render_template("register.html", form=registration, current_user=current_user)
+        else:
+            flash('Invalid OTP\nRedirecting to the Registration Page')
+            return redirect(url_for('register'))
+    return render_template("register.html", form=verification, current_user=current_user)
+
+
+
+def send_verification_mail():
+    recipient = os.environ.get('EMAIL')
+    subject = ' TEST MAIL'
+    with app.open_resource('templates/otp_mail.html') as f:
+        html_content = f.read().decode('utf-8')
+
+    otp = random.randint(100000, 999999)
+    name = session.get('registration_data')['name']
+    html_content = html_content.replace('{{ OTP }}', str(otp))
+    html_content = html_content.replace('{{ NAME }}', name)
+
+    message = Message(subject, recipients=[recipient])
+    message.html = html_content
+    try:
+        mail.send(message)
+        flash("OTP SENT SUCCESSFULLY")
+        return otp
+    except Exception as e:
+        print(f"Error sending email: {e}")
+
 
 
 # TODO: Retrieve a user from the database based on their email. 
