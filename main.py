@@ -9,7 +9,7 @@ from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import Integer, String, Text, ForeignKey
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
-from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm, OtpVerify
+from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm, OtpVerify, ResetPassword, ResetForm
 import os
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
@@ -204,6 +204,63 @@ def login():
 def logout():
     logout_user()
     return redirect(url_for('get_all_posts'))
+
+
+#Making the verification for the reset password
+@app.route('/reset-password', methods=["POST", "GET"])
+def reset_password_form():
+    verification = OtpVerify()
+    reset_form = ResetForm()
+    if verification.validate_on_submit():
+
+        user_input = verification.otp_verify.data
+        reset_data = session.get('reset_data')
+        if user_input == reset_data['otp']:
+
+            return render_template("login.html", form=reset_form, current_user=current_user)
+
+        else:
+            flash('Invalid OTP\nRedirecting to the Registration Page')
+            return redirect(url_for('register'))
+
+    elif reset_form.validate_on_submit():
+        reset_data = session.get('reset_data')
+        user = User.query.filter_by(email=reset_data['email']).first()
+        user.password = generate_password_hash(password=reset_form.password.data, method="pbkdf2:sha256", salt_length=8)
+        db.session.commit()
+        login_user(user)
+        return redirect(url_for('get_all_posts'))
+
+
+
+    return render_template("register.html", form=verification, current_user=current_user)
+
+
+
+
+# Making a way to reset the password
+@app.route("/reset", methods=["POST", "GET"])
+def reset_password():
+    reset = ResetPassword()
+    if reset.validate_on_submit():
+        email = reset.email.data
+        user = User.query.filter_by(email=email).first()
+        if user:
+            otp = generate_otp()
+            session['reset_data'] = {
+                'email': user.email,
+                'name': user.name,
+                'otp': str(otp)
+            }
+            send_verification_mail(session['reset_data'])
+
+            return redirect(url_for('reset_password_form'))
+
+        else:
+            flash("The User does not exist.")
+            return redirect(url_for("reset_password"))
+
+    return render_template("reset_form.html", form=reset, current_user=current_user)
 
 
 @app.route('/')

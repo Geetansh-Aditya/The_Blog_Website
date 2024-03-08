@@ -36,3 +36,10 @@ class CommentForm(FlaskForm):
 class OtpVerify(FlaskForm):
     otp_verify = StringField(label="OTP", validators=[DataRequired()])
     submit = SubmitField("Verify")
+
+class ResetPassword(FlaskForm):
+    email = StringField(label="Email", validators=[DataRequired()])
+    submit = SubmitField("Send OTP!")
+class ResetForm(FlaskForm):
+    password = PasswordField(label="New Password", validators=[DataRequired()])
+    submit = SubmitField("Reset Password")
