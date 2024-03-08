@@ -9,22 +9,20 @@ from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import Integer, String, Text, ForeignKey
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_mail import Mail, Message
 from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm, OtpVerify
 import os
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 
 
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
-# Adding some more config for the otp verification
-app.config['MAIL_SERVER'] = 'smtp-mail.outlook.com'
-app.config['MAIL_USERNAME'] = os.environ.get('EMAIL')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('EMAIL')
-app.config['MAIL_PASSWORD'] = os.environ.get('PASSWORD_EMAIL')
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USE_SSL'] = False
-mail = Mail(app)
+
+# Adding the new mail configuration
+config = sib_api_v3_sdk.Configuration()
+config.api_key['api-key'] = os.environ.get('EMAIL_API')
+api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(config))
 
 
 ckeditor = CKEditor(app)
@@ -99,9 +97,7 @@ def register():
         email = registration.email.data
         password = generate_password_hash(password=registration.password.data, method="pbkdf2:sha256", salt_length=8)
         name = registration.name.data
-
         user = User.query.filter_by(email=email).first()
-
         if user:
             flash("You have already registered. Log in instead", category="error")
             return redirect(url_for("login"))
@@ -114,7 +110,6 @@ def register():
             'name' : name,
             'otp': str(otp)
         }
-        session['registration_initiated'] = True
 
         return redirect(url_for('verification'))
 
@@ -123,10 +118,6 @@ def register():
 
 @app.route("/verification", methods=['POST', 'GET'])
 def verification():
-    if not session.get('registration_initiated'):
-        flash('Access Denied', category='error')
-        return redirect(url_for('register'))
-
     verification = OtpVerify()
     if verification.validate_on_submit():
 
@@ -157,28 +148,33 @@ def verification():
 
 
 def send_verification_mail():
-    recipient = session.get('registration_data')['email']
-    subject = 'OTP For Blog Journey'
-    with app.open_resource('templates/otp_mail.html') as f:
-        html_content = f.read().decode('utf-8')
+    subject = 'OTP for Blog Journey'
+    sender = {"name": "Aditya", "email": os.environ.get('EMAIL')}
+    with open("templates/otp_mail.html", encoding="utf-8") as file:
+        html_content = file.read()
 
+    html_content = str(html_content)
     otp = random.randint(100000, 999999)
-    name = session.get('registration_data')['name']
+    username = session.get('registration_data')['name']
     html_content = html_content.replace('{{ OTP }}', str(otp))
-    html_content = html_content.replace('{{ NAME }}', name)
+    html_content = html_content.replace('{{ NAME }}', username)
 
-    message = Message(subject, recipients=[recipient])
-    message.html = html_content
+    recipient = [{"email": f"{session.get('registration_data')['email']}", "name": "TO PERSON"}]
+
+    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(to=recipient, html_content=html_content, sender=sender, subject=subject)
+
     try:
-        mail.send(message)
-        flash("OTP SENT SUCCESSFULLY")
+        # Send the email
+        api_response = api_instance.send_transac_email(send_smtp_email)
+        print(api_response)
+    except ApiException as e:
+        print("Exception when calling SMTPApi->send_transac_email: %s\n" % e)
+    finally:
         return otp
-    except Exception as e:
-        print(f"Error sending email: {e}")
 
 
 
-# TODO: Retrieve a user from the database based on their email. 
+# TODO: Retrieve a user from the database based on their email.
 @app.route('/login', methods=["POST", "GET"])
 def login():
     login_form = LoginForm()
@@ -285,4 +281,4 @@ def contact():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
