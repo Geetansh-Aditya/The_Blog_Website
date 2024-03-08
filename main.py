@@ -89,6 +89,9 @@ with app.app_context():
     db.create_all()
 
 
+def generate_otp():
+    return random.randint(100000,999999)
+
 
 @app.route('/register', methods=["POST", "GET"])
 def register():
@@ -102,7 +105,7 @@ def register():
             flash("You have already registered. Log in instead", category="error")
             return redirect(url_for("login"))
 
-        otp = send_verification_mail()
+        otp = generate_otp()
 
         session['registration_data'] = {
             'email':email,
@@ -110,6 +113,8 @@ def register():
             'name' : name,
             'otp': str(otp)
         }
+
+        send_verification_mail(session['registration_data'])
 
         return redirect(url_for('verification'))
 
@@ -147,21 +152,22 @@ def verification():
 
 
 
-def send_verification_mail():
+def send_verification_mail(registration_data):
     subject = 'OTP for Blog Journey'
     sender = {"name": "Aditya", "email": os.environ.get('EMAIL')}
     with open("templates/otp_mail.html", encoding="utf-8") as file:
         html_content = file.read()
 
     html_content = str(html_content)
-    otp = random.randint(100000, 999999)
-    username = session.get('registration_data')['name']
+    otp = registration_data['otp']
+    username = registration_data['name']
     html_content = html_content.replace('{{ OTP }}', str(otp))
     html_content = html_content.replace('{{ NAME }}', username)
 
-    recipient = [{"email": f"{session.get('registration_data')['email']}", "name": "TO PERSON"}]
+    recipient = [{"email": registration_data['email'], "name": "TO PERSON"}]
 
-    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(to=recipient, html_content=html_content, sender=sender, subject=subject)
+    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(to=recipient, html_content=html_content, sender=sender,
+                                                   subject=subject)
 
     try:
         # Send the email
@@ -169,8 +175,6 @@ def send_verification_mail():
         print(api_response)
     except ApiException as e:
         print("Exception when calling SMTPApi->send_transac_email: %s\n" % e)
-    finally:
-        return otp
 
 
 
